@@ -1,23 +1,31 @@
 name: meshagent-ubuntucore
-version: '0.3'
+version: '0.4'
 summary: MeshCentral Agent for Ubuntu Core
 description: |
   Adds a MeshCentral agent for remote access to Ubuntu Core devices.
 confinement: devmode
 grade: stable
 
+platforms:
+  rpi:
+    build-on: arm64
+    build-for: arm64
+  rpi-amd64:
+    build-on: amd64
+    build-for: arm64
+
 apps:
-  meshagent-ubuntucore:
-    command: meshinstall.sh
-        
   meshagent-ubuntucore-service:
     command: meshservice.sh
     daemon: simple
-    restart-condition: always
+    restart-condition: on-failure
     passthrough:
-      restart-delay: 5s
+      restart-delay: 10s
+    plugs:  [network, network-bind, network-observe, system-files]
 
 parts:
   meshagent-ubuntucore:
     source: meshsource/
     plugin: dump
+    stage-packages:
+      - iputils-ping
