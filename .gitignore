@@ -1,0 +1,10 @@
+meshsource/meshagent
+
+meshsource/meshagent.msh
+
+*.snap
+
+parts/
+prime/
+stage/
+.snapcraft/
