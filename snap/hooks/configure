@@ -1,0 +1,52 @@
+#!/bin/sh
+# Validate snap configuration on snap set
+
+MESH_SERVER=$(snapctl get mesh-server 2>/dev/null)
+MESH_ID=$(snapctl get mesh-id 2>/dev/null)
+SERVER_ID=$(snapctl get server-id 2>/dev/null)
+
+if [ -n "$MESH_SERVER" ]; then
+    case "$MESH_SERVER" in
+        http://*|https://*) ;;
+        *)
+            snapctl set-health blocked "mesh-server deve começar com http:// ou https://"
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -n "$MESH_ID" ]; then
+    case "$MESH_ID" in
+        0x*) ;;
+        *)
+            snapctl set-health blocked "mesh-id deve começar com 0x"
+            exit 1
+            ;;
+    esac
+fi
+
+# expected-brand-id e expected-model não podem conter espaços ou carateres especiais
+EXPECTED_BRAND=$(snapctl get expected-brand-id 2>/dev/null)
+EXPECTED_MODEL=$(snapctl get expected-model 2>/dev/null)
+
+if [ -n "$EXPECTED_BRAND" ]; then
+    case "$EXPECTED_BRAND" in
+        *[[:space:]]*|*[\<\>\|\&\;]*)
+            snapctl set-health blocked "expected-brand-id contém carateres inválidos"
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -n "$EXPECTED_MODEL" ]; then
+    case "$EXPECTED_MODEL" in
+        *[[:space:]]*|*[\<\>\|\&\;]*)
+            snapctl set-health blocked "expected-model contém carateres inválidos"
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -n "$MESH_SERVER" ] && [ -n "$MESH_ID" ] && [ -n "$SERVER_ID" ]; then
+    snapctl set-health okay
+fi

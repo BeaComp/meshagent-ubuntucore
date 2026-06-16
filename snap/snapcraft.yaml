@@ -1,0 +1,100 @@
+name: meshagent-ubuntucore
+version: '0.1'
+base: core24
+title: MeshCentral Agent for Ubuntu Core
+summary: MeshCentral Agent for Ubuntu Core
+description: |
+  Adds a MeshCentral agent for remote access to Ubuntu Core devices.
+
+  The meshagent binary is NOT bundled in this snap. It is provided at
+  runtime by the gadget snap via the content interface. See the
+  gadget-integration/ directory for the required gadget snap additions.
+
+  After installation, connect the content plug to the gadget snap:
+
+    snap connect meshagent-ubuntucore:gadget-meshagent-bin <gadget>:meshagent-bin
+
+  Or declare it in the model assertion:
+
+    connections:
+      - plug: meshagent-ubuntucore:gadget-meshagent-bin
+        slot: <gadget>:meshagent-bin
+
+  Then configure the agent:
+
+    snap set meshagent-ubuntucore mesh-server=https://seu-servidor
+    snap set meshagent-ubuntucore mesh-id=0xSEU_MESH_ID
+    snap set meshagent-ubuntucore server-id=SEU_SERVER_ID
+    snap set meshagent-ubuntucore expected-brand-id=mybrand # recommended
+    snap set meshagent-ubuntucore expected-model=my-model   # recommended
+
+  The MeshID and ServerID can be found in the Linux/BSD section
+  of the "Add Agent" option on your MeshCentral server.
+
+  If mesh-name is omitted, the device serial number is used automatically,
+  giving each device a unique identity in the MeshCentral console.
+
+  Setting expected-brand-id and expected-model restricts the agent to run
+  only on authorised device families. The serial assertion is verified via
+  snapd (cryptographic signature chain) and the device-key-sha3-384 field
+  is used as a hardware-bound fingerprint alongside the serial number.
+
+  For gadget snap pre-configuration, add defaults to gadget.yaml:
+
+    defaults:
+      <snap-id>:
+        mesh-server: https://seu-servidor
+        mesh-id: 0xSEU_MESH_ID
+        server-id: SEU_SERVER_ID
+        expected-brand-id: mybrand
+        expected-model: my-model
+
+confinement: devmode
+grade: devel
+license: MIT
+contact: beatrizcristinafaria47@gmail.com
+
+plugs:
+  gadget-meshagent-bin:
+    interface: content
+    content: meshagent-bin
+    target: $SNAP/gadget-bin
+    default-provider: pi
+
+platforms:
+  rpi:
+    build-on: arm64
+    build-for: arm64
+  rpi-amd64:
+    build-on: amd64
+    build-for: arm64
+
+apps:
+  meshagent-ubuntucore-service:
+    command: meshservice.sh
+    daemon: simple
+    restart-condition: on-failure
+    passthrough:
+      restart-delay: 10s
+    plugs:
+      - network
+      - network-bind
+      - network-observe
+      - system-files
+      - gadget-meshagent-bin
+
+parts:
+  meshagent-ubuntucore:
+    source: meshsource/
+    plugin: dump
+    stage:
+      - meshservice.sh
+    stage-packages:
+      - iputils-ping
+
+  # Creates the empty mount-point directory that the content interface
+  # requires to exist inside the snap before bind-mounting the gadget slot.
+  gadget-bin-mountpoint:
+    plugin: nil
+    override-build: |
+      mkdir -p "${SNAPCRAFT_PART_INSTALL}/gadget-bin"
