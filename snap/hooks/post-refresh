@@ -1,0 +1,2 @@
+#!/bin/sh
+snapctl connect :gadget-meshagent-bin pi:meshagent-bin || true

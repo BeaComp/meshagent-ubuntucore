@@ -1,5 +1,5 @@
-name: meshagent-ubuntucore
-version: '0.1'
+name: meshagent-ubuntu-core
+version: '0.7'
 base: core24
 title: MeshCentral Agent for Ubuntu Core
 summary: MeshCentral Agent for Ubuntu Core
@@ -10,15 +10,8 @@ description: |
   runtime by the gadget snap via the content interface. See the
   gadget-integration/ directory for the required gadget snap additions.
 
-  After installation, connect the content plug to the gadget snap:
-
-    snap connect meshagent-ubuntucore:gadget-meshagent-bin <gadget>:meshagent-bin
-
-  Or declare it in the model assertion:
-
-    connections:
-      - plug: meshagent-ubuntucore:gadget-meshagent-bin
-        slot: <gadget>:meshagent-bin
+  The content interface is auto-connected via the model assertion
+  connections field. No manual snap connect needed on Ubuntu Core.
 
   Then configure the agent:
 
@@ -59,7 +52,6 @@ plugs:
     interface: content
     content: meshagent-bin
     target: $SNAP/gadget-bin
-    default-provider: pi
 
 platforms:
   rpi:
@@ -70,7 +62,7 @@ platforms:
     build-for: arm64
 
 apps:
-  meshagent-ubuntucore-service:
+  meshagent-ubuntu-core-service:
     command: meshservice.sh
     daemon: simple
     restart-condition: on-failure
@@ -80,11 +72,10 @@ apps:
       - network
       - network-bind
       - network-observe
-      - system-files
       - gadget-meshagent-bin
 
 parts:
-  meshagent-ubuntucore:
+  meshagent-ubuntu-core:
     source: meshsource/
     plugin: dump
     stage:
