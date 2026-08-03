@@ -1,5 +1,5 @@
 name: meshagent-ubuntu-core
-version: '0.7'
+version: '2.0'
 base: core24
 title: MeshCentral Agent for Ubuntu Core
 summary: MeshCentral Agent for Ubuntu Core

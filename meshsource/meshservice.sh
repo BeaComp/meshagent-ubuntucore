@@ -15,6 +15,22 @@ GADGET_BIN="$SNAP/gadget-bin"
 GADGET_DIRECT="/snap/pi/current/meshagent-bin"
 
 # =============================================================================
+# Step 0: Waiting serial assertion (commissioning)
+# =============================================================================
+echo "Waiting serial assertion..."
+SERIAL_ASSERTION=""
+COUNT=0
+while [ -z "$SERIAL_ASSERTION" ]; do
+    SERIAL_ASSERTION=$(snap known serial 2>/dev/null)
+    if [ -z "$SERIAL_ASSERTION" ]; then
+        COUNT=$((COUNT + 1))
+        [ $COUNT -ge 6 ] && { echo "Serial Assertion ainda indisponível — o systemd irá reiniciar."; exit 1; }
+        echo "Serial Assertion não disponível ($COUNT/6)..."
+        sleep 10
+    fi
+done
+
+# =============================================================================
 # Step 1: Locate binary from gadget snap
 # Preferred: content interface ($SNAP/gadget-bin) — active when plug is connected
 # Fallback:  direct path (/snap/pi/current) — works in devmode when plug is not
@@ -80,6 +96,24 @@ fi
 
 echo "[meshservice] meshagent.msh:"
 cat "$SNAP_DATA/meshagent.msh"
+
+# =============================================================================
+# Step 3.5: Auto-connect the telemetry snap's device-identity content interface
+#
+# O snapd NÃO auto-conecta este content interface no seeding (a ligação do
+# gadget.yaml é ignorada porque o slot do gadget ainda não está registado no
+# momento do auto-connect — "gadget connections: ignoring missing slot").
+# O default-provider resolveria isto, mas exige construir o snap em arm64
+# (o gadget "pi" não existe para a arch de build amd64).
+#
+# Como este meshagent corre em devmode e como root, liga o interface em nome
+# do sistema. Idempotente: se já estiver ligado, é um no-op.
+if snap list iot-telemetry >/dev/null 2>&1; then
+    echo "[meshservice] Connecting iot-telemetry:device-identity to pi:device-identity..."
+    snap connect iot-telemetry:device-identity pi:device-identity 2>/dev/null \
+        && echo "[meshservice] device-identity connected." \
+        || echo "[meshservice] device-identity connect skipped (já ligado ou indisponível)."
+fi
 
 # =============================================================================
 # Step 4: Start the MeshCentral agent
