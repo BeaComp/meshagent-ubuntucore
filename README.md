@@ -1,192 +1,154 @@
 # MeshCentral Agent for Ubuntu Core
 
-Adds a MeshCentral agent for remote access to Ubuntu Core devices.
-Requires devmode and beta options due to the permissions required by the
-meshagent binary. As such, YOU INSTALL THIS AT YOUR OWN RISK.
+`meshagent-ubuntu-core` adds a MeshCentral agent for NAT-transparent remote
+access to Ubuntu Core devices. It runs in `devmode` because of the broad
+permissions the MeshCentral agent requires, so **you install this at your own
+risk**.
 
-MeshCentral is developed by the very talented Ylian Saint-Hilaire.
 This is a fork of the unofficial snap originally created by MatinatorX
-(https://github.com/MatinatorX/meshagent-ubuntucore), modified to support
-Serial Assertion verification via a Serial Vault proxy before allowing
-remote management access.
+(https://github.com/MatinatorX/meshagent-ubuntucore), reworked for a supervised
+Zero-Touch Provisioning (ZTP) workflow: the agent only starts on a device that
+has already been **commissioned** (i.e. has a valid Serial Assertion issued
+through the Admission Control Layer / Serial Vault).
 
-Please visit the main MeshCentral website for more information:
-https://meshcentral.com/info/
-
----
-
-## What's different in this fork
-
-The original snap downloaded the MeshCentral agent binary at runtime from
-the server. This fork bundles the agent binary and `.msh` configuration
-directly inside the snap, and adds the following security features:
-
-- **Serial Assertion verification**: before starting the agent, the script
-  reads the device's Serial Assertion from the snapd assertions store and
-  sends it (base64-encoded) to a Serial Vault proxy for cryptographic
-  verification.
-- **Device status enforcement**: the proxy returns the device status
-  (commissioned / quarantine / revoked). Revoked devices are blocked from
-  connecting to MeshCentral.
+MeshCentral is developed by Ylian Saint-Hilaire — https://meshcentral.com/info/
 
 ---
 
-## Prerequisites — preparing the meshsource folder
+## What this fork does
 
-Before building the snap, you must download the MeshCentral agent binary
-and its configuration file and place them in the `meshsource/` folder.
+Compared with the original snap (which downloaded the agent binary at runtime),
+this fork:
 
-### 1. Download the agent binary
+- **Does not bundle the agent binary.** The `meshagent` binary and its
+  `meshagent.msh` configuration are provided at runtime by the **gadget snap**
+  through a content interface (see [Where the agent binary comes
+  from](#where-the-agent-binary-comes-from)).
+- **Gates the agent on hardware identity.** The service blocks until the device
+  has a Serial Assertion (`snap known serial`). A device that has not been
+  commissioned never starts the agent.
+- **Keeps the WiFi radio awake** with a small companion daemon
+  (`wifi-keepawake`), preventing the idle power-save drops that otherwise break
+  SSH and the management tunnel on Raspberry Pi.
+- **Auto-connects the telemetry snap's identity interface** as a devmode helper
+  (`iot-telemetry:device-identity` → `pi:device-identity`).
 
-Go to your MeshCentral server, navigate to **My Account → Add Agent →
-Linux / BSD**, and copy the install command. It will contain your server
-URL and MeshID.
+---
 
-Then download the binary directly (replace the URL and MeshID with yours):
+## How the service works
+
+The `meshagent-ubuntu-core-service` daemon runs `meshservice.sh`, which performs
+the following steps on every boot:
+
+1. **Wait for commissioning.** Poll `snap known serial` (6 attempts, 10 s apart).
+   If no Serial Assertion is present, the script exits and systemd retries — the
+   agent stays down until the device is commissioned.
+2. **Locate the agent binary** provided by the gadget snap: preferring the
+   content interface at `$SNAP/gadget-bin/meshagent`, and falling back to the
+   direct path `/snap/pi/current/meshagent-bin/meshagent` (used in devmode when
+   the content interface is not auto-connected).
+3. **Wait for network connectivity** by pinging the `MeshServer` host read from
+   `meshagent.msh` (up to 30 retries).
+4. **Stage the files** into `$SNAP_DATA`. If `meshagent.msh` changed since the
+   last run, the local `meshagent.db` is deleted so the agent re-registers.
+5. **Connect the telemetry identity interface** (`snap connect
+   iot-telemetry:device-identity pi:device-identity`), idempotently, if the
+   `iot-telemetry` snap is installed.
+6. **Start the MeshCentral agent.**
+
+A second daemon, `wifi-keepawake`, runs `keepawake.sh`: it disables SDIO
+runtime power management on the WiFi interface and sends a periodic keepalive to
+the default gateway, so the radio never idles into a power-save state.
+
+---
+
+## Where the agent binary comes from
+
+The `meshagent` binary and `meshagent.msh` are **not** part of this snap. They
+are delivered by the gadget (`pi`) snap through a content interface:
+
+```yaml
+# in this snap (snapcraft.yaml)
+plugs:
+  gadget-meshagent-bin:
+    interface: content
+    content: meshagent-bin
+    target: $SNAP/gadget-bin
+```
+
+The gadget snap must expose a matching `meshagent-bin` content **slot**
+containing `meshagent` (executable) and `meshagent.msh` (the MeshCentral server
+URL and MeshID for the device group). On Ubuntu Core the connection is
+auto-established via the model assertion's `connections` field; in devmode the
+service falls back to the direct gadget path.
+
+To obtain the binary and `.msh` for the gadget slot, use your MeshCentral
+server (**My Account → Add Agent → Linux / BSD**):
 
 ```sh
-# For ARM64 (Raspberry Pi 5 / Ubuntu Core on aarch64) — agent ID 26
+# ARM64 (Raspberry Pi 4/5, aarch64) — agent id 26
 wget "https://YOUR_MESHCENTRAL_SERVER/meshagents?id=26" \
-    --no-check-certificate \
-    -O meshsource/meshagent
+    --no-check-certificate -O meshagent && chmod +x meshagent
 
-chmod +x meshsource/meshagent
-```
-
-Agent IDs by architecture:
-
-| ID | Architecture                          |
-|----|---------------------------------------|
-| 5  | Linux x86 32-bit                      |
-| 6  | Linux x86 64-bit                      |
-| 25 | ARM 32-bit (Raspberry Pi 1/2/3)       |
-| 26 | ARM 64-bit (Raspberry Pi 5 / aarch64) |
-
-### 2. Download the .msh configuration file
-
-The `.msh` file contains the MeshCentral server URL, MeshID and ServerID
-for your device group. Download it with:
-
-```sh
 wget "https://YOUR_MESHCENTRAL_SERVER/meshsettings?id=YOUR_MESH_ID" \
-    --no-check-certificate \
-    -O meshsource/meshagent.msh
+    --no-check-certificate -O meshagent.msh
 ```
 
-### 3. Verify the meshsource folder
+| Agent id | Architecture                          |
+|----------|---------------------------------------|
+| 6        | Linux x86 64-bit                      |
+| 25       | ARM 32-bit (Raspberry Pi 1/2/3)       |
+| 26       | ARM 64-bit (Raspberry Pi 4/5, aarch64)|
 
-After downloading, your `meshsource/` folder should contain:
-
-```
-meshsource/
-├── meshagent        ← agent binary (executable)
-├── meshagent.msh    ← server configuration
-├── meshinstall.sh   ← install script (included in repo)
-└── meshservice.sh   ← service script (included in repo)
-```
-
-Confirm the binary is executable:
-
-```sh
-ls -la meshsource/meshagent
-# Should show: -rwxr-xr-x
-```
-
-### 4. Configure the service script
-
-Edit `meshsource/meshservice.sh` and set your server details:
-
-```sh
-MESH_SERVER_IP="YOUR_MESHCENTRAL_SERVER_IP"
-PROXY_URL="http://YOUR_SERIAL_VAULT_PROXY_IP:8082"
-```
+Place both files in the gadget snap's content-slot directory, not in this snap.
 
 ---
 
-## Installing from the Snap Store (when available)
+## Building the snap
 
-```sh
-sudo snap install meshagent-ubuntucore --beta --devmode
-```
-
----
-
-## Building the Snap
-
-### On a standard Ubuntu machine (recommended)
-
-Install snapcraft and build:
+The snap builds for `arm64`, either natively or cross-built from `amd64`
+(see the `platforms` block in `snapcraft.yaml`):
 
 ```sh
 sudo snap install snapcraft --classic
 cd meshagent-ubuntucore/
-snapcraft --destructive-mode
+snapcraft            # produces meshagent-ubuntu-core_3_arm64.snap
 ```
 
-The output snap file will be created in the same directory.
+This snap ships only the service scripts (`meshservice.sh`, `keepawake.sh`) and
+stages `iputils-ping` and `iproute2`; the agent binary is not included by design.
 
-### On an Ubuntu Core device
-
-Install the classic snap first, then enter the classic shell:
+### Install on the device
 
 ```sh
-sudo snap install classic --beta --devmode
-classic
+sudo snap install meshagent-ubuntu-core_*.snap --dangerous --devmode
 ```
 
-Install snapcraft inside classic:
+Check both daemons:
 
 ```sh
-sudo snap install snapcraft
-# Or on older Ubuntu Core:
-apt install snapcraft
-```
+snap services meshagent-ubuntu-core
+#  meshagent-ubuntu-core.meshagent-ubuntu-core-service   enabled  active
+#  meshagent-ubuntu-core.wifi-keepawake                  enabled  active
 
-Copy the source to your home directory and run:
-
-```sh
-snapcraft
-```
-
-### Installing the built snap on the device
-
-```sh
-sudo snap install meshagent-ubuntucore_*.snap --dangerous --devmode
-```
-
----
-
-## Serial Vault Proxy
-
-This fork requires a Serial Vault proxy running at `PROXY_URL`. The proxy
-must expose the following endpoint:
-
-```
-POST /v1/verify-assertion
-Content-Type: application/json
-
-{ "assertion": "<base64-encoded Serial Assertion>" }
-```
-
-Response:
-
-```json
-{ "status": "commissioned" | "quarantine" | "revoked" | "rejected" }
+sudo journalctl -u snap.meshagent-ubuntu-core.meshagent-ubuntu-core-service -f
 ```
 
 ---
 
 ## Security notes
 
-- This snap runs in `devmode` because reading the Serial Assertion from
-  `/var/lib/snapd/assertions/` requires filesystem access that is blocked
-  by `strict` confinement without the super-privileged `snapd-control`
-  interface (which requires Snap Store approval).
-- In a production deployment, consider publishing the snap to a Brand
-  Store with an approved `snap-declaration` that grants `snapd-control`.
-- The fail-open policy (agent starts if proxy is unreachable) is a
-  deliberate design decision for availability. Change to fail-closed
-  (`exit 1` on unreachable proxy) for higher security requirements.
+- **Runs in `devmode`** because the MeshCentral agent needs permissions beyond
+  what `strict` confinement grants without a super-privileged interface. For a
+  production deployment, publish to a Brand Store with an approved
+  `snap-declaration`.
+- **Commissioning gate:** the agent will not start until the device holds a
+  Serial Assertion. Admission (approved-list check + hardware proof-of-possession)
+  and revocation are enforced by the Admission Control Layer, which also blocks
+  telemetry for revoked devices — this snap only reacts to the locally present
+  assertion.
+- **Restart policy:** the service is `restart-condition: on-failure`, so a
+  not-yet-commissioned device keeps retrying until its identity is issued.
 
 ---
 
