@@ -1,5 +1,5 @@
 name: meshagent-ubuntu-core
-version: '2.0'
+version: '3'
 base: core24
 title: MeshCentral Agent for Ubuntu Core
 summary: MeshCentral Agent for Ubuntu Core
@@ -74,14 +74,26 @@ apps:
       - network-observe
       - gadget-meshagent-bin
 
+  wifi-keepawake:
+    command: keepawake.sh
+    daemon: simple
+    restart-condition: always
+    passthrough:
+      restart-delay: 5s
+    plugs:
+      - network
+      - network-observe
+
 parts:
   meshagent-ubuntu-core:
     source: meshsource/
     plugin: dump
     stage:
       - meshservice.sh
+      - keepawake.sh
     stage-packages:
       - iputils-ping
+      - iproute2
 
   # Creates the empty mount-point directory that the content interface
   # requires to exist inside the snap before bind-mounting the gadget slot.
